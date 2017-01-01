@@ -2,6 +2,7 @@
 # import math
 import time
 import uuid
+import random
 # import numpy as np
 
 import Box2D
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 VIEWPORT_W = 1600
 VIEWPORT_H = 1200
 
-FOOD_SPAWN_RATE = 10
+FOOD_SPAWN_RATE = 10  # 1 tick in 100
 FOOD_LIFETIME = 10
 
 
@@ -25,10 +26,16 @@ class DeadEntityException(Exception):
 
 
 class Entity(object):
-    def __init__(self):
+    def __init__(self, entity_type):
         self.lifetime = -1
         self.step_count = 0
         self.id = uuid.uuid4()
+        self.entity_type = entity_type
+
+        logger.debug(u"Spawned new entity {}".format(self))
+
+    def __repr__(self):
+        return u"Entity {} id: {}".format(self.entity_type, self.id)
 
     def _render(self, viewer):
         pass
@@ -36,16 +43,15 @@ class Entity(object):
     def _step(self):
         self.step_count += 1
 
-        if self.step_count > self.lifetime:
+        if self.lifetime > 0 and self.step_count > self.lifetime:
             raise DeadEntityException
 
 
 class Food(Entity):
     def __init__(self):
-        self.lifetime = FOOD_LIFETIME
+        Entity.__init__(self, "food")
 
-    def _step(self):
-        Entity._step(self)
+        self.lifetime = FOOD_LIFETIME
 
 
 class Spawner(object):
@@ -57,12 +63,10 @@ class Spawner(object):
         logger.debug(u"Init Spawner {}".format(self))
     
     def __iter__(self):
-        logger.debug(u"Iter {}".format(self))
         self.cur_index = 0
         return self
 
     def next(self):
-        logger.debug(u"Next {}".format(self))
         if self.cur_index >= len(self.entities):
             raise StopIteration
         else:
@@ -71,7 +75,30 @@ class Spawner(object):
             return ret
 
     def _step(self):
-        pass
+        logger.debug(u"Stepping spawner")
+        if random.randint(0, FOOD_SPAWN_RATE) == 0:
+            self._spawn_food()
+
+        new_list = []
+
+        logger.debug(u"Stepping {} entities".format(len(self.entities)))
+
+        for entity in self.entities:
+            try:
+                entity._step()
+
+                new_list.append(entity)
+            except DeadEntityException:
+                logger.debug(u"Entity dead {}".format(entity))
+
+        self.entities = new_list
+
+    def _spawn_food(self):
+        new_entity = Food()
+        self._spawn_entity(new_entity)
+
+    def _spawn_entity(self, new_entity):
+        self.entities.append(new_entity)
 
 
 class SurvivalWorld(gym.Env):
@@ -87,6 +114,7 @@ class SurvivalWorld(gym.Env):
         self.viewer = None
 
     def _step(self, action):
+        self.spawner._step()
         pass
 
     def _render(self, mode='human', close=False):
@@ -117,7 +145,7 @@ if __name__ == "__main__":
     s = env.reset()
 
     while True:
-        env.step(None)
+        env._step(None)
         env.render()
         time.sleep(1)
 
