@@ -11,14 +11,19 @@ import logging
 import gym
 # from gym import spaces
 # from gym.utils import seeding
+from gym.envs.classic_control import rendering
 
 logger = logging.getLogger(__name__)
 
-VIEWPORT_W = 1600
-VIEWPORT_H = 1200
+VIEWPORT_W = 400
+VIEWPORT_H = 600
 
-FOOD_SPAWN_RATE = 10  # 1 tick in 100
-FOOD_LIFETIME = 10
+FOOD_SPAWN_RATE = 2
+FOOD_LIFETIME = 2
+FOOD_RADIUS = 20
+
+SHARK_SPAWN_RATE = 2
+SHARK_LIFETIME = -1
 
 
 class DeadEntityException(Exception):
@@ -37,10 +42,10 @@ class Entity(object):
     def __repr__(self):
         return u"Entity {} id: {}".format(self.entity_type, self.id)
 
-    def _render(self, viewer):
+    def render(self, viewer):
         pass
 
-    def _step(self):
+    def step(self):
         self.step_count += 1
 
         if self.lifetime > 0 and self.step_count > self.lifetime:
@@ -48,10 +53,68 @@ class Entity(object):
 
 
 class Food(Entity):
-    def __init__(self):
+    def __init__(self, world):
         Entity.__init__(self, "food")
 
         self.lifetime = FOOD_LIFETIME
+
+        x = random.randint(0, VIEWPORT_W)
+        y = random.randint(0, VIEWPORT_H)
+
+        self.body = world.CreateDynamicBody(
+            position=(x, y),
+            angle=0.0,
+            fixtures=Box2D.b2.fixtureDef(
+                shape=Box2D.b2.circleShape(
+                    radius=FOOD_RADIUS
+                )
+            )
+        )
+
+    def render(self, viewer):
+        f = self.body.fixtures[0]
+        trans = self.body.transform
+        t = rendering.Transform(translation=trans * f.shape.pos)
+        viewer.draw_circle(
+            FOOD_RADIUS,
+            color=(1, 0, 0)
+        ).add_attr(t)
+
+
+class Shark(Entity):
+    def __init__(self, world):
+        Entity.__init__(self, "shark")
+
+        self.lifetime = SHARK_LIFETIME
+
+        x = random.randint(0, VIEWPORT_W)
+        y = random.randint(0, VIEWPORT_H)
+
+        self.body = world.CreateDynamicBody(
+            position=(x, y),
+            angle=0.0,
+            fixtures=Box2D.b2.fixtureDef(
+                shape=Box2D.b2.polygonShape(
+                    vertices=[
+                        (-15, 0),
+                        (0, 15),
+                        (15, 0),
+                        (15, -15),
+                        (-15, -15)
+                    ]
+                )
+            )
+        )
+
+    def render(self, viewer):
+        f = self.body.fixtures[0]
+        trans = self.body.transform
+
+        path = [trans * v for v in f.shape.vertices]
+        viewer.draw_polygon(
+            path,
+            color=(0, 0, 1)
+        )
 
 
 class Spawner(object):
@@ -76,8 +139,12 @@ class Spawner(object):
 
     def _step(self):
         logger.debug(u"Stepping spawner")
+
         if random.randint(0, FOOD_SPAWN_RATE) == 0:
             self._spawn_food()
+
+        if random.randint(0, SHARK_SPAWN_RATE) == 0:
+            self._spawn_shark()
 
         new_list = []
 
@@ -85,7 +152,7 @@ class Spawner(object):
 
         for entity in self.entities:
             try:
-                entity._step()
+                entity.step()
 
                 new_list.append(entity)
             except DeadEntityException:
@@ -94,7 +161,11 @@ class Spawner(object):
         self.entities = new_list
 
     def _spawn_food(self):
-        new_entity = Food()
+        new_entity = Food(self.world)
+        self._spawn_entity(new_entity)
+
+    def _spawn_shark(self):
+        new_entity = Shark(self.world)
         self._spawn_entity(new_entity)
 
     def _spawn_entity(self, new_entity):
@@ -125,9 +196,13 @@ class SurvivalWorld(gym.Env):
                 self.viewer = None
             return
 
-        from gym.envs.classic_control import rendering
         if self.viewer is None:
             self.viewer = rendering.Viewer(VIEWPORT_W, VIEWPORT_H)
+
+        for entity in self.spawner:
+            entity.render(self.viewer)
+
+        return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
     def _reset(self):
         self._destroy()
