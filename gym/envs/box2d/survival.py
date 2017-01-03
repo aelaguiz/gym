@@ -18,12 +18,16 @@ logger = logging.getLogger(__name__)
 VIEWPORT_W = 400
 VIEWPORT_H = 600
 
-FOOD_SPAWN_RATE = 2
-FOOD_LIFETIME = 2
+FPS = 60
+
+FOOD_SPAWN_RATE = FPS * 10
+FOOD_LIFETIME = FPS * 60
 FOOD_RADIUS = 20
 
-SHARK_SPAWN_RATE = 2
+SHARK_SPAWN_RATE = FPS
 SHARK_LIFETIME = -1
+
+SHARK_MASS = 1
 
 
 class DeadEntityException(Exception):
@@ -94,6 +98,9 @@ class Shark(Entity):
             position=(x, y),
             angle=0.0,
             fixtures=Box2D.b2.fixtureDef(
+                density=0.0,
+                friction=0.0,
+                restitution=0.0,
                 shape=Box2D.b2.polygonShape(
                     vertices=[
                         (-15, 0),
@@ -115,6 +122,24 @@ class Shark(Entity):
             path,
             color=(0, 0, 1)
         )
+
+        logger.debug(u"Rendering shark at {} {}".format(
+            self.body.position.x,
+            self.body.position.y
+        ))
+
+    def step(self):
+        Entity.step(self)
+
+        # if random.randint(0, 5) == 0:
+        logger.debug(u"Applying impulse on {}".format(self))
+
+        self.body.ApplyLinearImpulse(
+            impulse=(0, 50000),
+            point=(0, -15),
+            wake=True
+        )
+        # self.body.ApplyAngularImpulse(impulse=50.0, wake=True)
 
 
 class Spawner(object):
@@ -186,7 +211,7 @@ class SurvivalWorld(gym.Env):
 
     def _step(self, action):
         self.spawner._step()
-        pass
+        self.world.Step(1 / 60., 10, 10)
 
     def _render(self, mode='human', close=False):
         logger.debug(u"Rendering")
@@ -222,7 +247,7 @@ if __name__ == "__main__":
     while True:
         env._step(None)
         env.render()
-        time.sleep(1)
+        time.sleep(1 / 60.)
 
     """
     spawn = Spawner()
