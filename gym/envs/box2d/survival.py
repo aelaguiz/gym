@@ -20,12 +20,17 @@ VIEWPORT_H = 600
 
 FPS = 60
 
-FOOD_SPAWN_RATE = FPS * 10
+FOOD_INITIAL = 5
+FOOD_SPAWN_RATE = FPS
 FOOD_LIFETIME = FPS * 60
 FOOD_RADIUS = 20
+FOOD_COLLISION_CATEGORY = 0x01
+FOOD_COLLISION_MASK = 0x03  # Food collides with other food and sharks
 
-SHARK_SPAWN_RATE = FPS
+SHARK_SPAWN_RATE = FPS / 2
 SHARK_LIFETIME = -1
+SHARK_COLLISION_CATEGORY = 0x02
+SHARK_COLLISION_MASK = 0x01  # Sharks only collide with food
 
 SHARK_MASS = 1
 
@@ -65,15 +70,19 @@ class Food(Entity):
         x = random.randint(0, VIEWPORT_W)
         y = random.randint(0, VIEWPORT_H)
 
-        self.body = world.CreateDynamicBody(
+        self.body = world.CreateStaticBody(
             position=(x, y),
             angle=0.0,
             fixtures=Box2D.b2.fixtureDef(
+                categoryBits=FOOD_COLLISION_CATEGORY,
+                maskBits=FOOD_COLLISION_MASK,
                 shape=Box2D.b2.circleShape(
                     radius=FOOD_RADIUS
                 )
             )
         )
+
+        self.body.userData = self
 
     def render(self, viewer):
         f = self.body.fixtures[0]
@@ -101,6 +110,9 @@ class Shark(Entity):
                 density=0.0,
                 friction=0.0,
                 restitution=0.0,
+                isSensor=True,
+                categoryBits=SHARK_COLLISION_CATEGORY,
+                maskBits=SHARK_COLLISION_MASK,
                 shape=Box2D.b2.polygonShape(
                     vertices=[
                         (-15, 0),
@@ -113,6 +125,8 @@ class Shark(Entity):
             )
         )
 
+        self.body.userData = self
+
     def render(self, viewer):
         f = self.body.fixtures[0]
         trans = self.body.transform
@@ -123,16 +137,16 @@ class Shark(Entity):
             color=(0, 0, 1)
         )
 
-        logger.debug(u"Rendering shark at {} {}".format(
-            self.body.position.x,
-            self.body.position.y
-        ))
+        # logger.debug(u"Rendering shark at {} {}".format(
+        # self.body.position.x,
+        # self.body.position.y
+        # ))
 
     def step(self):
         Entity.step(self)
 
         # if random.randint(0, 5) == 0:
-        logger.debug(u"Applying impulse on {}".format(self))
+        # logger.debug(u"Applying impulse on {}".format(self))
 
         self.body.ApplyLinearImpulse(
             impulse=(0, 50000),
@@ -149,6 +163,9 @@ class Spawner(object):
         self.world = world
 
         logger.debug(u"Init Spawner {}".format(self))
+
+        for i in range(FOOD_INITIAL):
+            self._spawn_food()
     
     def __iter__(self):
         self.cur_index = 0
@@ -162,8 +179,17 @@ class Spawner(object):
             self.cur_index += 1
             return ret
 
+    def kill_entity(self, entity):
+        logger.debug(u"Killing entity {}".format(entity))
+        try:
+            index = self.entities.index(entity)
+            del self.entities[index]
+        except:
+            logger.debug(u"Entity {} was already killed".format(entity))
+            pass
+
     def _step(self):
-        logger.debug(u"Stepping spawner")
+        # logger.debug(u"Stepping spawner")
 
         if random.randint(0, FOOD_SPAWN_RATE) == 0:
             self._spawn_food()
@@ -173,7 +199,7 @@ class Spawner(object):
 
         new_list = []
 
-        logger.debug(u"Stepping {} entities".format(len(self.entities)))
+        # logger.debug(u"Stepping {} entities".format(len(self.entities)))
 
         for entity in self.entities:
             try:
@@ -197,6 +223,43 @@ class Spawner(object):
         self.entities.append(new_entity)
 
 
+class ContactDetector(Box2D.b2.contactListener):
+    def __init__(self, spawner):
+        Box2D.b2.contactListener.__init__(self)
+        self.spawner = spawner
+
+    def BeginContact(self, contact):
+        bodyA = contact.fixtureA.body
+        bodyB = contact.fixtureB.body
+
+        entityA = bodyA.userData
+        entityB = bodyB.userData
+
+        logger.debug(u"Collision between {} and {}".format(
+            bodyA.userData, bodyB.userData))
+        
+        if entityB.entity_type == "shark" and entityA.entity_type == "food":
+            temp = entityA
+            entityA = entityB
+            entityB = temp
+
+        if entityA.entity_type == "shark" and entityB.entity_type == "food":
+            self.spawner.kill_entity(entityB)
+
+    """
+        #log.deubg
+        #if self.env.lander==contact.fixtureA.body or self.env.lander==contact.fixtureB.body:
+            #self.env.game_over = True
+        #for i in range(2):
+            #if self.env.legs[i] in [contact.fixtureA.body, contact.fixtureB.body]:
+                #self.env.legs[i].ground_contact = True
+    #def EndContact(self, contact):
+        #for i in range(2):
+            #if self.env.legs[i] in [contact.fixtureA.body, contact.fixtureB.body]:
+                #self.env.legs[i].ground_contact = False
+    """
+
+
 class SurvivalWorld(gym.Env):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
@@ -206,6 +269,9 @@ class SurvivalWorld(gym.Env):
         self.world = Box2D.b2World()
         self.spawner = Spawner(self.world)
 
+        self.world.contactListener_keepref = ContactDetector(self.spawner)
+        self.world.contactListener = self.world.contactListener_keepref
+
         self._reset()
         self.viewer = None
 
@@ -214,7 +280,7 @@ class SurvivalWorld(gym.Env):
         self.world.Step(1 / 60., 10, 10)
 
     def _render(self, mode='human', close=False):
-        logger.debug(u"Rendering")
+        # logger.debug(u"Rendering")
         if close:
             if self.viewer is not None:
                 self.viewer.close()
